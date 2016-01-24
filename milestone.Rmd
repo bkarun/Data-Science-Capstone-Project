@@ -1,0 +1,338 @@
+---
+title: "Data Science Capstone Project Milestone Report"
+author: "Bipin Karunakaran"
+date: "12/25/2015"
+output: html_document
+---
+####Executive Summary:
+This report provides the summary of the data preparation process and exploratory analysis done on the Swiftkey corpora consisting of blogs, news and twitter feeds provided by Coursera, with the final objective of building a predictive text model that predcits the next word in a sequence. R packages written for Natural Language Processing, namely tm and rweka are used to create the corpus and then to build Ngrams (Uni, Bi, Tri and Quadragrams). The results of these Ngrams are summarized into dataframes that are used to create summary tables, barplots and word clouds. The moldeling steps envisaged are also stated in the end.
+
+####Reading in the data:
+The files are downloaded and unzipped. For this project, I am limiting the analyses to the English language files in the en_US directory, namely, the 3 files en_US.blogs.txt, en_US.blogs.txt and en_US.twitter.txt. The files are read in using the appropriate Unicode encoding and conversions. A 5% sample of each of these files is written into /cleanedSamples directory. Since the memory needs for processing Ngram tokenizers are very high, I had to settle for a small sample size. 
+
+```{r, warning=FALSE, message=FALSE}
+#Read in US.blogs and write out sample
+USblogsRaw <- file("./en_US/en_US.blogs.txt", open="rb")
+USblogs <- readLines(USblogsRaw, skipNul=TRUE,  encoding="UTF-8")
+close(USblogsRaw)
+USblogs <- iconv(USblogs, "latin1", "ASCII", sub="")
+rm(USblogsRaw)
+set.seed(123)
+sampBlogs <- sample(USblogs, 0.08*length(USblogs))
+write(sampBlogs, file="./cleanedSamples/en_US.blogs.txt")
+```
+
+
+The same kind of processing is done on the News and Tweets files and samples written out (code chunk hidden using echo=FALSE option)
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Read in US.news and write out sample
+USnewsRaw <- file("./en_US/en_US.news.txt", open="rb")
+USnews <- readLines(USnewsRaw, skipNul=TRUE, encoding="UTF-8")
+close(USnewsRaw)
+rm(USnewsRaw)
+USnews <- iconv(USnews, "latin1", "ASCII", sub="")
+set.seed(123)
+sampNews <- sample(USnews,0.08*length(USnews))
+write(sampNews, file="./cleanedSamples/en_US.news.txt")
+
+#Read in US.tweets and write out sample
+UStweetsRaw <- file("./en_US/en_US.twitter.txt", open="rb")
+UStweets <- readLines(UStweetsRaw,skipNul=TRUE, encoding="UTF-8")
+close(UStweetsRaw)
+rm(UStweetsRaw)
+UStweets <- iconv(UStweets, "latin1", "ASCII", sub="")
+set.seed(123)
+sampTweets <- sample(UStweets, 0.08*length(UStweets))
+write(sampTweets, file="./cleanedSamples/en_US.twitter.txt")
+```
+
+####Summary table
+The word count, the mean word count and the number of lines for each of the 3 files are output below:
+
+```{r, warnings = FALSE, message=FALSE}
+library(stringi)
+#Count words and lines
+WordCountBlogs <- stri_count_words(USblogs)
+WordCountNews <- stri_count_words(USnews)
+WordCountTweets <- stri_count_words(UStweets)
+#output a summary table 
+data.frame(filename = c("USblogs","USnews","UStweets"),
+                            LineCount = c(length(USblogs),length(USnews),length(UStweets)),
+                            WordCount = c(sum(WordCountBlogs), sum(WordCountNews),                                                                                       sum(WordCountTweets)),
+                            MeanWordCount =c(round(mean(WordCountBlogs),2), round(mean(WordCountNews),                             2) ,round(mean(WordCountTweets),2)))
+           
+```
+
+All the intermediate data sets are removed in order to clear memory(code hidden).
+
+```{r echo= FALSE, warnings = FALSE, message=FALSE}
+#Remove all the temporary datasets to save memory
+rm(USblogs)
+rm(sampBlogs)
+rm(USnews)
+rm(sampNews)
+rm(UStweets)
+rm(sampTweets)
+rm(WordCountBlogs)
+rm(WordCountNews)
+rm(WordCountTweets)
+```
+
+####Building the corpus
+The VCorpus function in the tm package is used for tokenization into one single corpus. Subsequently, the tm_map function is used for the necessary conversions as in the code below. 
+
+```{r, echo=TRUE, warnings = FALSE, message=FALSE}
+library(tm)
+UScorpus <- VCorpus(DirSource("./cleanedSamples", encoding = "UTF-8"), readerControl = list(language= "en"))
+UScorpus <- tm_map(UScorpus, tolower)
+UScorpus <- tm_map(UScorpus, stripWhitespace)
+UScorpus <- tm_map(UScorpus, removePunctuation)
+UScorpus <- tm_map(UScorpus, removeNumbers)
+UScorpus <- tm_map(UScorpus, PlainTextDocument)
+```
+
+####Stop words and Stemming
+Since the objective is to predict the next words, removing stop words is not appropriate here, as the next word could be different based on the stopwords. Similarly stemming is also not done here, because that would strip the contextual information from the word, important for predicting the next word. 
+
+
+####Tokenization
+The NGramTokenizer function in the RWeka package is used to create the Ngrams. Separate Ngrams are built for the bolgs, news and twitter files and then then rolled up into data frames, which are then merged to create the unigram, bigram, trigram and quadragram data frames. 
+
+```{r,echo = TRUE, warnings = FALSE, , comment=FALSE}
+library(RWeka)
+#Caret functions for Ngram tokenization
+UnigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 1))
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+TrigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min =3, max =3))
+QuadragramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min =4, max =4))
+PentagramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min =5, max =5))
+```
+
+####Working around memory constraints
+To work around the massive memory resources needed for Ngram tokenization, each of the corpora (blogs, news and tweets) were processed separately, converted to data frames and then merged to get the Ngram dataframe. After each dataframe is created, all the intermediate datasets were removed to clear space (code hidden)
+
+####Unigram Tokenization
+The code for Unigram tokenization is shown below:
+
+```{r,echo=TRUE, warning = FALSE,message=FALSE }
+#Create Unigrams for blogs, news and twitter separately and merge the dataframes to UnigramData
+blogsUnigram<- DocumentTermMatrix(UScorpus[1], control = list(tokenize = UnigramTokenizer)) 
+newsUnigram<- DocumentTermMatrix(UScorpus[2], control = list(tokenize = UnigramTokenizer)) 
+tweetsUnigram<- DocumentTermMatrix(UScorpus[3], control = list(tokenize = UnigramTokenizer)) 
+blogsUnimat <- sort(colSums(as.matrix(blogsUnigram)), decreasing=TRUE)
+blogsUniData <- data.frame(word = names(blogsUnimat), freq = blogsUnimat)
+newsUnimat <- sort(colSums(as.matrix(newsUnigram)), decreasing=TRUE)
+newsUniData <- data.frame(word = names(newsUnimat), freq = newsUnimat)
+tweetsUnimat <- sort(colSums(as.matrix(tweetsUnigram)), decreasing=TRUE)
+tweetsUniData <- data.frame(word = names(tweetsUnimat), freq = tweetsUnimat)
+UnigramData <- merge(merge(blogsUniData, newsUniData, by = "word", x.all = TRUE, y.all =TRUE),                                 tweetsUniData, by = "word", x.all=TRUE, y.all=TRUE)
+UnigramData$frequency = UnigramData$freq.x + UnigramData$freq.y + UnigramData$freq 
+UnigramData <- subset(UnigramData, select = -c(freq.x, freq.y, freq))
+UnigramData <- UnigramData[order(-UnigramData$frequency),]
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+rm(blogsUnigram)
+rm(newsUnigram)
+rm(tweetsUnigram)
+rm(blogsUnimat)
+rm(newsUnimat)
+rm(tweetsUnimat)
+rm(blogsUniData)
+rm(newsUniData)
+rm(tweetsUniData)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+blogsBigram<- DocumentTermMatrix(UScorpus[1], control = list(tokenize = BigramTokenizer)) 
+newsBigram<- DocumentTermMatrix(UScorpus[2], control = list(tokenize = BigramTokenizer)) 
+tweetsBigram<- DocumentTermMatrix(UScorpus[3], control = list(tokenize = BigramTokenizer))
+blogsBimat <- sort(colSums(as.matrix(blogsBigram)), decreasing=TRUE)
+blogsBiData <- data.frame(word = names(blogsBimat), freq = blogsBimat)
+newsBimat <- sort(colSums(as.matrix(newsBigram)), decreasing=TRUE)
+newsBiData <- data.frame(word = names(newsBimat), freq = newsBimat)
+tweetsBimat <- sort(colSums(as.matrix(tweetsBigram)), decreasing=TRUE)
+tweetsBiData <- data.frame(word = names(tweetsBimat), freq = tweetsBimat)
+BigramData <- merge(merge(blogsBiData, newsBiData, by = "word", x.all = TRUE, y.all =TRUE),                                 tweetsBiData, by = "word", x.all=TRUE, y.all=TRUE)
+BigramData$frequency = BigramData$freq.x + BigramData$freq.y + BigramData$freq
+BigramData <- subset(BigramData, select = -c(freq.x, freq.y, freq))
+BigramData <- BigramData[order(-BigramData$frequency),]
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+rm(blogsBigram)
+rm(newsBigram)
+rm(tweetsBigram)
+rm(blogsBimat)
+rm(newsBimat)
+rm(tweetsBimat)
+rm(blogsBiData)
+rm(newsBiData)
+rm(tweetsBiData)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+blogsTrigram<- DocumentTermMatrix(UScorpus[1], control = list(tokenize = TrigramTokenizer))
+newsTrigram<- DocumentTermMatrix(UScorpus[2], control = list(tokenize = TrigramTokenizer))
+tweetsTrigram<- DocumentTermMatrix(UScorpus[3], control = list(tokenize = TrigramTokenizer))
+blogsTrimat <- sort(colSums(as.matrix(blogsTrigram)), decreasing=TRUE)
+blogsTriData <- data.frame(word = names(blogsTrimat), freq = blogsTrimat)
+newsTrimat <- sort(colSums(as.matrix(newsTrigram)), decreasing=TRUE)
+newsTriData <- data.frame(word = names(newsTrimat), freq = newsTrimat)
+tweetsTrimat <- sort(colSums(as.matrix(tweetsTrigram)), decreasing=TRUE)
+tweetsTriData <- data.frame(word = names(tweetsTrimat), freq = tweetsTrimat)
+TrigramData <- merge(merge(blogsTriData, newsTriData, by = "word", x.all = TRUE, y.all =TRUE),                                 tweetsTriData, by = "word", x.all=TRUE, y.all=TRUE)
+TrigramData$frequency = TrigramData$freq.x + TrigramData$freq.y + TrigramData$freq
+TrigramData <- subset(TrigramData, select = -c(freq.x, freq.y, freq))
+TrigramData <- TrigramData[order(-TrigramData$frequency),]
+```
+
+```{r,echo=FALSE, warning=TRUE, message=FALSE}
+rm(blogsTrigram)
+rm(newsTrigram)
+rm(tweetsTrigram)
+rm(blogsTrimat)
+rm(newsTrimat)
+rm(tweetsTrimat)
+rm(blogsTriData)
+rm(newsTriData)
+rm(tweetsTriData)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+blogsQuadragram<- DocumentTermMatrix(UScorpus[1], control = list(tokenize = QuadragramTokenizer))
+newsQuadragram<- DocumentTermMatrix(UScorpus[2], control = list(tokenize = QuadragramTokenizer))
+tweetsQuadragram<- DocumentTermMatrix(UScorpus[3], control = list(tokenize = QuadragramTokenizer))
+blogsQuadramat <- sort(colSums(as.matrix(blogsQuadragram)), decreasing=TRUE)
+blogsQuadraData <- data.frame(word = names(blogsQuadramat), freq = blogsQuadramat)
+newsQuadramat <- sort(colSums(as.matrix(newsQuadragram)), decreasing=TRUE)
+newsQuadraData <- data.frame(word = names(newsQuadramat), freq = newsQuadramat)
+tweetsQuadramat <- sort(colSums(as.matrix(tweetsQuadragram)), decreasing=TRUE)
+tweetsQuadraData <- data.frame(word = names(tweetsQuadramat), freq = tweetsQuadramat)
+QuadragramData <- merge(merge(blogsQuadraData, newsQuadraData, by = "word", x.all = TRUE, y.all =TRUE),                                 tweetsQuadraData, by = "word", x.all=TRUE, y.all=TRUE)
+QuadragramData$frequency = QuadragramData$freq.x + QuadragramData$freq.y + QuadragramData$freq
+QuadragramData <- subset(QuadragramData, select = -c(freq.x, freq.y, freq))
+QuadragramData <- QuadragramData[order(-QuadragramData$frequency),]
+save(QuadragramData, file = "QuadragramData.RData")
+rm(blogsQuadragram)
+rm(newsQuadragram)
+rm(tweetsQuadragram)
+rm(blogsQuadramat)
+rm(newsQuadramat)
+rm(tweetsQuadramat)
+rm(blogsQuadraData)
+rm(newsQuadraData)
+rm(tweetsQuadraData)
+rm(QuadragramData)
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+blogsPentagram<- DocumentTermMatrix(UScorpus[1], control = list(tokenize = PentagramTokenizer))
+newsPentagram<- DocumentTermMatrix(UScorpus[2], control = list(tokenize = PentagramTokenizer))
+tweetsPentagram<- DocumentTermMatrix(UScorpus[3], control = list(tokenize = PentagramTokenizer))
+blogsPentamat <- sort(colSums(as.matrix(blogsPentagram)), decreasing=TRUE)
+blogsPentaData <- data.frame(word = names(blogsPentamat), freq = blogsPentamat)
+newsPentamat <- sort(colSums(as.matrix(newsPentagram)), decreasing=TRUE)
+newsPentaData <- data.frame(word = names(newsPentamat), freq = newsPentamat)
+tweetsPentamat <- sort(colSums(as.matrix(tweetsPentagram)), decreasing=TRUE)
+tweetsPentaData <- data.frame(word = names(tweetsPentamat), freq = tweetsPentamat)
+PentagramData <- merge(merge(blogsPentaData, newsPentaData, by = "word", x.all = TRUE, y.all =TRUE),                                 tweetsPentaData, by = "word", x.all=TRUE, y.all=TRUE)
+PentagramData$frequency = PentagramData$freq.x + PentagramData$freq.y + PentagramData$freq
+PentagramData <- subset(PentagramData, select = -c(freq.x, freq.y, freq))
+PentagramData <- PentagramData[order(-PentagramData$frequency),]
+ 
+rm(blogsPentagram)
+rm(newsPentagram)
+rm(tweetsPentagram)
+rm(blogsPentamat)
+rm(newsPentamat)
+rm(tweetsPentamat)
+rm(blogsPentaData)
+rm(newsPentaData)
+rm(tweetsPentaData)
+
+```
+
+The code chunks for the Bigram, Trigram and Quadragram tokenization are not being displayed, in order to keep the report concise. 
+
+####Top Ngrams
+
+```{r, warning=FALSE, message=FALSE}
+#Unigram
+head(UnigramData, n = 10)
+#Bigram
+head(BigramData, n = 10)
+#Trigram
+head(TrigramData, n = 10)
+#Quadragram
+head(QuadragramData, n = 10)
+```
+
+####Barplots of top Ngrams
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+#Barplot for Unigram
+ggplot(UnigramData[1:10,], aes(x=reorder(word, frequency), y=frequency)) +
+    geom_bar(stat = "identity", fill = "brown") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Unigram") + ylab("Frequency") +
+    labs(title = "Top Unigrams by Frequency")
+
+#Barplot for bigram
+ggplot(BigramData[1:10,], aes(x=reorder(word, frequency), y=frequency)) +
+    geom_bar(stat = "identity", fill = "brown") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Bigram") + ylab("Frequency") +
+    labs(title = "Top Bigrams by Frequency")
+
+#Barplot for Trigram
+ggplot(TrigramData[1:10,], aes(x=reorder(word, frequency), y=frequency)) +
+    geom_bar(stat = "identity", fill = "brown") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Trigram") + ylab("Frequency") +
+    labs(title = "Top Trigrams by Frequency")
+
+#Barplot for Quadragram
+ggplot(QuadragramData[1:10,], aes(x=reorder(word, frequency), y=frequency)) +
+    geom_bar(stat = "identity", fill = "brown") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Quadragram") + ylab("Frequency") +
+    labs(title = "Top Quadragrams by Frequency")
+```
+
+####Word Clouds
+Word Clouds with the top 50 words for each of the Ngrams are shown below
+
+```{r echo =TRUE, warning=FALSE, message=FALSE}
+library(wordcloud)
+#Unigram Word Cloud
+wordcloud(UnigramData[1:50,]$word, UnigramData[1:50,]$frequency, max.words=50, colors=brewer.pal(6, "Dark2"))
+
+#Bigram Word Cloud
+wordcloud(BigramData[1:50,]$word, BigramData[1:50,]$frequency, max.words=50, colors=brewer.pal(6, "Dark2"))
+
+#Trigram Word Cloud
+wordcloud(TrigramData[1:50,]$word, TrigramData[1:50,]$frequency, max.words=50, colors=brewer.pal(6, "Dark2"))
+
+#Quadragram Word Cloud
+wordcloud(QuadragramData[1:50,]$word, QuadragramData[1:50,]$frequency, max.words=50, colors=brewer.pal(6, "Dark2"))
+```
+
+
+####Next Steps:
+The next step is to build a prediction model using a combination of bigrams, trigrams and quadragrams. An appropriate smoothing technique may be chosen between Stupid-Backoff, Good-Turing and Kneser-Ney, based on further study and analyses. 
+
+```{r}
+save(UnigramData, file = "UnigramData.RData")
+rm(UnigramData)
+save(BigramData, file = "BigramData.RData")
+rm(BigramData)
+save(TrigramData, file = "TrigramData.RData")
+rm(TrigramData)
+
+save(PentagramData, file = "PentagramData.RData")
+```
